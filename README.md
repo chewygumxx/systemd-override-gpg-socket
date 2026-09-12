@@ -142,13 +142,10 @@ esac
 # -------
 
 if (( successful_gpghome )); then
-    temp_ps3="$PS3" PS3="Enable> "
     printf '%s\n' "Would you like to enable \`systemd-override-gpg-socket.service\`?"
-    select opt in yes no; do 
-        [[ "$opt" == "yes" ]] && systemctl --user enable --now systemd-override-gpg-socket.service
-        break
-    done
-    PS3="$temp_ps3"
+    read -r -p "Enable now? [Y/n] " reply
+    [[ -z "$reply" || "$reply" =~ ^[1Yy] ]] &&
+        systemctl --user enable --now systemd-override-gpg-socket.service
 fi
 
 ```
