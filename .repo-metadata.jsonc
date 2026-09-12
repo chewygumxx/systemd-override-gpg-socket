@@ -16,7 +16,7 @@
     "default_branch": "main",
     "description": "Adaptive GnuPG systemd socket resolution for custom GNUPGHOME. Resolves hashed socket filepaths before initialisation.",
     "category": "systemd-override",
-    "topics": [ "systemd", "gpg", "systemd-user", "GNUPGHOME" ],
+    "topics": [ "systemd", "gpg", "systemd-user", "GNUPGHOME", "gpg-socket" ],
     "immutable_releases": true,
     "license": {
         "filepath":  "./LICENSE",
