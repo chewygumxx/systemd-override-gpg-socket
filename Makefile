@@ -36,6 +36,8 @@ disable:
 	-systemctl --user disable --now $(UNIT)
 
 uninstall: disable
+	-find "$(UNITDIR)" -type f -name "90-$(SCRIPT).conf" -delete
+	-find "$(UNITDIR)" -type d -name '*.socket.d' -empty -delete
 	rm -f "$(BINDIR)/$(SCRIPT)" "$(UNITDIR)/$(UNIT)"
 	systemctl --user daemon-reload
 
@@ -52,7 +54,7 @@ check-gnupghome:
 			exit 1 \
 			;; \
 		GNUPGHOME=*) \
-			mkdir -m 700 -p "$${match#*=}"; \
+			mkdir -m 700 -p "$${match#*=}" || exit 1; \
 			printf '%s\n' \
 				"Success ^-^! GNUPGHOME is set within your systemd --user environment" \
 				"" \
