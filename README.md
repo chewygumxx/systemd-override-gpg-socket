@@ -78,77 +78,15 @@ with the freshly-computed `gpgconf --list-dirs` paths to re-associate.
 
 ## Installation
 
-```bash
-# ------
-# Clone
-# ------
-
-git clone https://github.com/chewygumxx/systemd-override-gpg-socket.git
-cd systemd-override-gpg-socket
-
-
-# --------
-# Install
-# --------
-
-install -Dm755 systemd-override-gpg-socket \
-    "$HOME/.local/bin/systemd-override-gpg-socket"
-install -Dm644 systemd-override-gpg-socket.service \
-    "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/systemd-override-gpg-socket.service"
-
-
-# ----------
-# GNUPGHOME
-# ----------
-
-# Confirm 'GNUPGHOME' is set within systemd user manager environment and enable
-# (Re-login is typically required after writing to "$XDG_CONFIG_HOME/environment.d/*.conf")
-grep_out="$(systemctl --user show-environment | grep "^GNUPGHOME=")"
-case "$grep_out" in
-    GNUPGHOME=${HOME}/.gnupg)
-        printf '%s\n' \
-            "Almost o-o, GNUPGHOME is set within your systemd --user environment," \
-            "but to the default directory:" \
-            "" \
-            "     $grep_out" \
-            "" \
-        ;;
-    GNUPGHOME=*)
-        successful_gpghome=1
-        mkdir -p "${grep_out#*=}"
-        printf '%s\n' \
-            "Success ^-^! GNUPGHOME is set within your systemd --user environment" \
-            "" \
-            "     $grep_out" \
-            "" \
-        ;;
-    *)
-        printf '%s\n' \
-            "Currently, no GNUPGHOME is set within your systemd --user environment." \
-            "" \
-            "1. Writing a file with the line:  GNUPGHOME=${HOME}/.local/share/gnupg" \
-            "2. Saving that file to:           ~/.config/environment.d/gnupg.conf" \
-            "3. Creating the directory with:   mkdir -p ${HOME}/.local/share/gnupg" \
-            "4. And finally, logging out and back in may help." \
-            "" \
-            "    https://www.freedesktop.org/software/systemd/man/latest/environment.d.html" \
-            ""
-        ;;
-esac
-
-
-# -------
-# Enable
-# -------
-
-if (( successful_gpghome )); then
-    printf '%s\n' "Would you like to enable \`systemd-override-gpg-socket.service\`?"
-    read -r -p "Enable now? [Y/n] " reply
-    [[ -z "$reply" || "$reply" =~ ^[1Yy] ]] &&
-        systemctl --user enable --now systemd-override-gpg-socket.service
-fi
-
+```sh
+git clone https://github.com/chewygumxx/systemd-override-gpg-socket.git && cd systemd-override-gpg-socket
+make
+# OR
+make install # Bypasses checks
 ```
+
+`make uninstall` reverses `make install`, disabling the unit and removing the
+files it placed.
 
 ## Verification
 
