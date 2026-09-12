@@ -79,41 +79,48 @@ with the freshly-computed `gpgconf --list-dirs` paths to re-associate.
 ## Installation
 
 ```bash
-# Clone this repository
+# ------
+# Clone
+# ------
+
 git clone https://github.com/chewygumxx/systemd-override-gpg-socket.git
 cd systemd-override-gpg-socket
 
+
+# --------
 # Install
+# --------
+
 install -Dm755 systemd-override-gpg-socket \
     "$HOME/.local/bin/systemd-override-gpg-socket"
 install -Dm644 systemd-override-gpg-socket.service \
     "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/systemd-override-gpg-socket.service"
 
+
+# ----------
+# GNUPGHOME
+# ----------
+
 # Confirm 'GNUPGHOME' is set within systemd user manager environment and enable
 # (Re-login is typically required after writing to "$XDG_CONFIG_HOME/environment.d/*.conf")
-match="$(systemctl --user show-environment | grep "^GNUPGHOME=")"
-case "$match" in
+grep_out="$(systemctl --user show-environment | grep "^GNUPGHOME=")"
+case "$grep_out" in
     GNUPGHOME=${HOME}/.gnupg)
         printf '%s\n' \
             "Almost o-o, GNUPGHOME is set within your systemd --user environment," \
             "but to the default directory:" \
             "" \
-            "     $match" \
+            "     $grep_out" \
             "" \
         ;;
     GNUPGHOME=*)
-        mkdir -p "${match#*=}"
+        successful_gpghome=1
+        mkdir -p "${grep_out#*=}"
         printf '%s\n' \
             "Success ^-^! GNUPGHOME is set within your systemd --user environment" \
             "" \
-            "     $match" \
+            "     $grep_out" \
             "" \
-            "Enable service?"
-
-        select opt in yes no; do 
-            [[ "$opt" == "yes" ]] && systemctl --user enable --now systemd-override-gpg-socket.service
-            break
-        done
         ;;
     *)
         printf '%s\n' \
@@ -128,6 +135,22 @@ case "$match" in
             ""
         ;;
 esac
+
+
+# -------
+# Enable
+# -------
+
+if (( successful_gpghome )); then
+    temp_ps3="$PS3" PS3="Enable> "
+    printf '%s\n' "Would you like to enable \`systemd-override-gpg-socket.service\`?"
+    select opt in yes no; do 
+        [[ "$opt" == "yes" ]] && systemctl --user enable --now systemd-override-gpg-socket.service
+        break
+    done
+    PS3="$temp_ps3"
+fi
+
 ```
 
 ## Verification
