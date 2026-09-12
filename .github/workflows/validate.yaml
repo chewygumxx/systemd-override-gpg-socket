@@ -27,6 +27,9 @@ env:
     SHELLCHECK_FILES: >-
         systemd-override-gpg-socket
     RELEASE_ASSETS: |
+        README.md
+        LICENSE
+        Makefile
         systemd-override-gpg-socket
         systemd-override-gpg-socket.service
 
@@ -164,9 +167,12 @@ jobs:
             - name: Checkout
               uses: actions/checkout@v7
 
+            - name: Create Archive
+              run: |
+                  # shellcheck disable=SC2086
+                  tar -czf "systemd-override-gpg-socket-${{ github.ref_name }}.tar.gz" $RELEASE_ASSETS
+
             - name: Release
               uses: softprops/action-gh-release@v3
               with:
-                  files: |
-                      LICENSE
-                      ${{ env.RELEASE_ASSETS }}
+                  files: systemd-override-gpg-socket-${{ github.ref_name }}.tar.gz
