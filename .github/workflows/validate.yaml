@@ -1,0 +1,172 @@
+# vim:set expandtab shiftwidth=4 filetype=yaml foldlevel=4:
+# SPDX-License-Identifier: GPL-3.0-only
+
+#
+#
+# ~chewygumxx/systemd-override-gpg-socket.git
+# ::: :/.github/workflows/validate.yaml
+#
+#
+
+name: Validate
+
+on:
+    push:
+        branches:
+            - main
+        tags:
+            - v*.*.*
+    pull_request:
+
+permissions:
+    contents: read
+
+env:
+    METADATA_PATH: >-
+        .repo-metadata.jsonc
+    SHELLCHECK_FILES: >-
+        systemd-override-gpg-socket
+    RELEASE_ASSETS: |
+        systemd-override-gpg-socket
+        systemd-override-gpg-socket.service
+
+jobs:
+    commitlint:
+        name:    Lint Commit Messages
+        runs-on: ubuntu-latest
+        if: >-  
+            github.event_name == 'push' ||
+            github.event_name == 'pull_request'
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+
+            - name: Lint Commit Messages
+              uses: wagoid/commitlint-github-action@v6
+
+
+    update-headers:
+        name:    Update Header Metdata
+        runs-on: ubuntu-latest
+        if: >-  
+            github.event_name == 'push'   && 
+            github.ref_type   == 'branch'
+        permissions:
+            contents: write
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+
+            - name: Update tracked files
+              uses: chewygumxx/sync-header-metadata@v2
+              with:
+                  mode: update
+
+    repo-metadata:
+        name:    Sync Repository Metadata
+        runs-on: ubuntu-latest
+        if: >-  
+            github.event_name == 'push'   && 
+            github.ref_type   == 'branch' &&
+            github.ref_name   == 'main'
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+
+            - name: Check for Metadata Changes
+              id:   check-modified
+              uses: dorny/paths-filter@v4
+              with:
+                  base: ${{ github.ref }}
+                  filters: |
+                      metadata:
+                          - ${{ env.METADATA_PATH }}
+
+            - name: Mint App Installation Token
+              if:   steps.check-modified.outputs.metadata == 'true'
+              id:   mint-token
+              uses: actions/create-github-app-token@v3
+              with:
+                  # `client-id` is the correct key, actionlint falsely corrects this to `app-id`
+                  client-id:   ${{    vars.METADATA_APP_CLIENT_ID   }}
+                  private-key: ${{ secrets.METADATA_APP_PRIVATE_KEY }}
+                  permission-administration: write
+
+            - name: Apply Metadata
+              if:   steps.check-modified.outputs.metadata == 'true'
+              uses: chewygumxx/sync-repo-metadata@v2
+              with:
+                  metadata_path: ${{ env.METADATA_PATH }}
+                  token: ${{ steps.mint-token.outputs.token }}
+
+    shellcheck:
+        name:    Shellcheck Linting
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+
+            - name: Shellcheck
+              uses: ludeeus/action-shellcheck@2.0.0
+              with:
+                  additional_files: ${{ env.SHELLCHECK_FILES }}
+
+    systemdlint:
+        name:    Systemd Linting
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+
+            - name: Install zsh
+              run: sudo apt-get update && sudo apt-get install -y zsh
+
+            - name: Install Script
+              run: |
+                  mkdir -p "$HOME/.local/bin"
+                  install -m 755 systemd-override-gpg-socket "$HOME/.local/bin/systemd-override-gpg-socket"
+
+            - name: Lint Systemd Unit Files
+              shell: zsh {0}
+              run: >-
+                  systemd-analyze --recursive-errors=no verify
+                  **/*.{service,socket,target,timer,mount,path,slice,swap,automount}(N.)
+
+    release:
+        name:        Release
+        runs-on:     ubuntu-latest
+        environment: release
+        permissions:
+            contents: write
+        needs:
+            - commitlint
+            - update-headers
+            - shellcheck
+            - systemdlint
+        if: >-
+            always() &&
+            github.ref_type == 'tag' &&
+            (needs.commitlint.result     == 'success' || needs.commitlint.result     == 'skipped') &&
+            (needs.update-headers.result == 'success' || needs.update-headers.result == 'skipped') &&
+                  needs.shellcheck.result  == 'success' &&
+                  needs.systemdlint.result == 'success'
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+
+            - name: Release
+              uses: softprops/action-gh-release@v3
+              with:
+                  files: |
+                      LICENSE
+                      ${{ env.RELEASE_ASSETS }}

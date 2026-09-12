@@ -1,0 +1,27 @@
+// vim:set expandtab shiftwidth=4 filetype=jsonc:
+// SPDX-License-Identifier: GPL-3.0-only
+
+//
+//
+// ~chewygumxx/systemd-override-gpg-socket.git
+// ::: :/.repo-metadata.jsonc
+//
+//
+
+{
+    "$schema": "https://raw.githubusercontent.com/chewygumxx/sync-repo-metadata/refs/tags/v2/schema.json",
+    "name":  "systemd-override-gpg-socket",
+    "owner": "chewygumxx",
+    "slug":  "chewygumxx/systemd-override-gpg-socket",
+    "default_branch": "main",
+    "description": "Adaptive GnuPG systemd socket resolution for custom GNUPGHOME. Resolves hashed socket filepaths before initialisation.",
+    "category": "systemd-override",
+    "topics": [ "systemd", "gpg", "systemd-user", "GNUPGHOME" ],
+    "immutable_releases": true,
+    "license": {
+        "filepath":  "./LICENSE",
+        "spdx_id":   "GPL-3.0-only",
+        "full_name": "GNU General Public License v3.0 only",
+        "url":       "https://spdx.org/licenses/GPL-3.0-only"
+    }
+}

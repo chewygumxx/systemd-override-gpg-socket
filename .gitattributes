@@ -1,0 +1,12 @@
+# vim:set expandtab shiftwidth=4 filetype=gitattributes:
+# SPDX-License-Identifier: GPL-3.0-only
+
+#
+#
+# ~chewygumxx/systemd-override-gpg-socket.git
+# ::: :/.gitattributes
+#
+#
+
+/LICENSE    -sync-header-metadata
+*.json      -sync-header-metadata
