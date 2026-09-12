@@ -1,86 +1,148 @@
+<!-- vim:set expandtab shiftwidth=2 filetype=markdown foldlevel=3: -->
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+
+<!--
+   -
+   - ~chewygumxx/systemd-override-gpg-socket.git
+   - ::: :/README.md
+   -
+   -->
+
+<!--
+   - Adaptive GnuPG systemd socket resolution for custom GNUPGHOME.
+   - Resolves hashed socket filepaths before initialisation.
+   -->
+
 # systemd-override-gpg-socket
 
-Generates systemd `--user` socket drop-ins so `dirmngr`, `keyboxd`, and `gpg-agent` (plus its `ssh`, `extra`, and `browser` variants) socket-activate on the paths GnuPG actually computes for a non-default, XDG-compliant `GNUPGHOME` — instead of the compiled-in defaults hardcoded in the `.socket` units GnuPG ships.
+Generates systemd user configuration overrides such that GnuPG `dirmngr`,
+`keyboxd`, `gpg-agent`, `ssh`, `extra`, and `browser` sockets activate per paths
+GnuPG *actually* computes for a non-default `GNUPGHOME`.
 
 ## The Problem
 
-When `GNUPGHOME` points somewhere other than GnuPG's compiled-in default, `gpgconf --list-dirs` computes socket paths under a homedir-specific hashed subdirectory (e.g. `$XDG_RUNTIME_DIR/gnupg/d.<hash>/S.gpg-agent`) to avoid collisions between multiple homedirs. The systemd user units shipped by the `gnupg` package hardcode the *default* socket paths in their `ListenStream=` directives, so with a custom `GNUPGHOME` the two never match — systemd activates sockets nothing is listening on, and GnuPG clients look for sockets systemd never created.
+When the environment variable `GNUPGHOME` is set elsewhere from GnuPG's default
+home directory, `gpgconf --list-dirs` computes hashed socket paths derived from
+the new `GNUPGHOME` to avoid socket collision. Systemd user `.socket` units
+shipped with the `gnupg` package are however, hardcoded to the *default* socket
+paths within their `ListenStream=` directives. As such, defining a
+non-conforming `GNUPGHOME` disassociates GnuPG socket references from their
+systemd defined filepaths and the two never rendezvous: 
+- Systemd activates sockets GnuPG clients will not interface.
+- GnuPG clients reference socket paths systemd never created.
 
-This repository closes that gap: a oneshot service runs before the affected socket units, diffs GnuPG's current socket paths against installed systemd units, and writes a drop-in overriding `ListenStream=` with the real, freshly-computed path — recalculated on every run, since the hash depends on `GNUPGHOME`'s resolved path.
+This repository mends that disharmony: A oneshot service runs before the
+affected socket units, compares GnuPG's hashed socket paths against the systemd
+`.socket` hardcoded paths, and generates ephemeral systemd overrides populated
+with the freshly-computed `gpgconf --list-dirs` paths to re-associate.
 
-## Contents
+## This Solution
 
-| File | Purpose |
-|---|---|
-| `systemd-override-gpg-socket` | Bash script. Diffs `gpgconf --list-dirs` socket entries against installed `systemd --user` `.socket` units, writes matching override drop-ins, prunes stale ones, and reloads the manager. |
-| `systemd-override-gpg-socket.service` | Oneshot `systemd --user` unit. Runs the script before the GnuPG socket units it overrides. |
+1. `systemd-override-gpg-socket.service` is a oneshot service that executes the
+   `systemd-override-gpg-socket` bash script before systemd initialises gpg
+   sockets. Inert if `GNUPGHOME` is not set within systemd environment.
+2. `systemd-override-gpg-socket` queries `gpgconf --list-dirs`, maps each
+   resolved gpg `*-socket` to its corresponding systemd `.socket` unit, and
+   writes a templated override file to its respective configuration directory:
 
-## How It Works
+   | `gpgconf --list-dirs` key | systemd unit               |
+   |---------------------------|----------------------------|
+   | `dirmngr-socket`          | `dirmngr.socket`           |
+   | `keyboxd-socket`          | `keyboxd.socket`           |
+   | `agent-socket`            | `gpg-agent.socket`         |
+   | `agent-ssh-socket`        | `gpg-agent-ssh.socket`     |
+   | `agent-extra-socket`      | `gpg-agent-extra.socket`   |
+   | `agent-browser-socket`    | `gpg-agent-browser.socket` |
+   
+   ```
+   $XDG_CONFIG_HOME/systemd/user/<unit>.socket.d/90-systemd-override-gpg-socket.conf
+   ```
+   A key with no matching *installed* unit is [logged](<#log>) and skipped rather
+   than failing the run.
 
-1. `systemd-override-gpg-socket.service` is ordered `Before=` and `Wants=` every affected `.socket` unit, and gated on `ConditionEnvironment=GNUPGHOME` — it's inert unless a custom homedir is actually in play.
-2. On activation, the script confirms `systemctl` and `gpgconf` are on `$PATH` (exit `127` otherwise), confirms `GNUPGHOME` is set and non-empty (exit `1` otherwise), and confirms the systemd user config directory already exists (exit `1` otherwise — see [Requirements](#requirements)).
-3. It runs `gpgconf --list-dirs` and maps each `*-socket` key to a systemd unit name:
-
-    | `gpgconf --list-dirs` key | systemd unit |
-    |---|---|
-    | `dirmngr-socket` | `dirmngr.socket` |
-    | `keyboxd-socket` | `keyboxd.socket` |
-    | `agent-socket` | `gpg-agent.socket` |
-    | `agent-ssh-socket` | `gpg-agent-ssh.socket` |
-    | `agent-extra-socket` | `gpg-agent-extra.socket` |
-    | `agent-browser-socket` | `gpg-agent-browser.socket` |
-
-    A key with no matching *installed* unit is logged and skipped rather than failing the run.
-4. For each remaining key it writes:
-
-    ```
-    $XDG_CONFIG_HOME/systemd/user/<unit>.socket.d/90-systemd-override-gpg-socket.conf
-    ```
-
-    clearing the inherited `ListenStream=` and replacing it with the resolved path, via a tempfile + atomic `mv` so an interrupted run can't leave a truncated drop-in. The drop-in carries its own `ConditionEnvironment=GNUPGHOME`, so it's harmless even if read outside this service's control.
-5. Any previously-generated `90-systemd-override-gpg-socket.conf` whose unit is no longer in the current set is removed, along with its `*.socket.d/` directory if that leaves it empty (a directory still holding other drop-ins is left alone).
-6. `systemctl --user daemon-reload` picks up the changes.
-
-The numeric `90-` prefix follows the same drop-in ordering convention used by `sysctl.d(5)`, `tmpfiles.d(5)`, and `udev` rules: files in a `.d/` directory are applied in lexical order, so a high prefix wins over lower-numbered drop-ins touching the same directive.
+3. Stale `90-systemd-override-gpg-socket.conf` and the redundant empty
+   directories they leave are cleaned up.
+4. The path corrective overrides are registered and implemented with
+   `systemctl --user daemon-reload`.
 
 ## Requirements
 
-- `bash` ≥ 4 (associative arrays, `[[ -v ]]`)
-- `systemd` (`systemctl --user`)
-- GnuPG (`gpgconf`)
-- GNU coreutils (`realpath`, `mktemp`)
-- `$XDG_CONFIG_HOME/systemd/user` (or `~/.config/systemd/user`) must already exist — `install -D` below creates it as a side effect of installing the `.service` unit, so run the install steps in order.
-- `GNUPGHOME` exported into the **systemd user manager's** own environment, most conventionally via a drop-in under `~/.config/environment.d/*.conf` — not just exported in your shell's rc files. Both `ConditionEnvironment=` and the script itself read the manager's environment, which shell-only exports never reach.
+- `gpg`
+- `systemd`
+- `bash`
+- `GNUPGHOME` exported into the **systemd user manager's** own environment, most
+  conventionally via `~/.config/environment.d/*.conf` (exporting from shell rc
+  files is ineffective).
+- Directories `$XDG_CONFIG_HOME/systemd/user` or `~/.config/systemd/user` must
+  already exist.
 
 ## Installation
 
-```sh
-install -Dm755 systemd-override-gpg-socket "$HOME/.local/bin/systemd-override-gpg-socket"
+```bash
+# Clone this repository
+git clone https://github.com/chewygumxx/systemd-override-gpg-socket.git
+cd systemd-override-gpg-socket
+
+# Install
+install -Dm755 systemd-override-gpg-socket \
+    "$HOME/.local/bin/systemd-override-gpg-socket"
 install -Dm644 systemd-override-gpg-socket.service \
-    "$HOME/.config/systemd/user/systemd-override-gpg-socket.service"
+    "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/systemd-override-gpg-socket.service"
+
+# Confirm 'GNUPGHOME' is set within systemd user manager environment and enable
+# (Re-login is typically required after writing to "$XDG_CONFIG_HOME/environment.d/*.conf")
+match="$(systemctl --user show-environment | grep "^GNUPGHOME=")"
+case "$match" in
+    GNUPGHOME=${HOME}/.gnupg)
+        printf '%s\n' \
+            "Almost o-o, GNUPGHOME is set within your systemd --user environment," \
+            "but to the default directory:" \
+            "" \
+            "     $match" \
+            "" \
+        ;;
+    GNUPGHOME=*)
+        mkdir -p "${match#*=}"
+        printf '%s\n' \
+            "Success ^-^! GNUPGHOME is set within your systemd --user environment" \
+            "" \
+            "     $match" \
+            "" \
+            "Enable service?"
+
+        select opt in yes no; do 
+            [[ "$opt" == "yes" ]] && systemctl --user enable --now systemd-override-gpg-socket.service
+            break
+        done
+        ;;
+    *)
+        printf '%s\n' \
+            "Currently, no GNUPGHOME is set within your systemd --user environment." \
+            "" \
+            "1. Writing a file with the line:  GNUPGHOME=${HOME}/.local/share/gnupg" \
+            "2. Saving that file to:           ~/.config/environment.d/gnupg.conf" \
+            "3. Creating the directory with:   mkdir -p ${HOME}/.local/share/gnupg" \
+            "4. And finally, logging out and back in may help." \
+            "" \
+            "    https://www.freedesktop.org/software/systemd/man/latest/environment.d.html" \
+            ""
+        ;;
+esac
 ```
 
-Confirm `GNUPGHOME` is visible to the systemd user manager (a fresh login is usually required after adding an `environment.d` drop-in):
-
-```sh
-systemctl --user show-environment | grep GNUPGHOME
-```
-
-Enable the unit:
-
-```sh
-systemctl --user enable --now systemd-override-gpg-socket.service
-```
-
-## Verifying
+## Verification
 
 ```sh
 systemctl --user status systemd-override-gpg-socket.service
-systemctl --user cat gpg-agent.socket
-gpgconf --list-dirs agent-socket
+systemctl --user cat    gpg-agent.socket
+gpgconf   --list-dirs   agent-socket
 ```
 
-The `ListenStream=` shown under the `90-systemd-override-gpg-socket.conf` drop-in in `systemctl --user cat gpg-agent.socket` should match the path `gpgconf --list-dirs agent-socket` reports. Run-by-run detail (`INFO`/`ERROR`/`FATAL` lines) is available via:
+The `ListenStream=` shown under the `90-systemd-override-gpg-socket.conf`
+drop-in in `systemctl --user cat gpg-agent.socket` should match the path
+`gpgconf --list-dirs agent-socket` reports.
+
+### Log
 
 ```sh
 journalctl --user -u systemd-override-gpg-socket.service
@@ -88,11 +150,33 @@ journalctl --user -u systemd-override-gpg-socket.service
 
 ## Notes & Caveats
 
-- **Safe no-op without a custom homedir.** If `GNUPGHOME` is unset in the manager's environment, both the service's `ConditionEnvironment=` and the script's own guard skip execution entirely. Stock GnuPG setups are unaffected.
-- **Re-run after `GNUPGHOME` changes.** The hashed socket directory is derived from `GNUPGHOME`'s resolved path. Changing it — including moving the underlying directory — requires re-running the service (`systemctl --user restart systemd-override-gpg-socket.service`) to regenerate the overrides.
-- **Stale overrides are pruned automatically.** If a socket unit that previously got an override disappears from the current run's mapping (e.g. the `gnupg` package no longer ships it), the script deletes the corresponding `90-systemd-override-gpg-socket.conf` and, if nothing else is left in it, the `.socket.d/` directory too.
-- **Don't hand-edit the generated `.conf` files.** They're regenerated on every run and are marked as such in their own header; change the script or the unit file instead.
+### Safe no-op without `GNUPGHOME`
+
+If `GNUPGHOME` is unset within the manager's environment, both the service's
+`ConditionEnvironment=` and the script's own guard skip execution entirely.
+Stock GnuPG setups are unaffected.
+
+### Changing `GNUPGHOME`
+
+The hashed socket directory is derived from the resolved path of `GNUPGHOME`.
+Redefining it requires re-running the service to regenerate the overrides.
+
+```bash
+systemctl --user restart systemd-override-gpg-socket.service
+```
+
+### Stale Override Cleanup
+
+Overrides that provide for deprecated GnuPG hashed paths are removed upon next
+execution. If removed the override leaves an empty directory, that directory is
+removed also.
+
+### Do not hand-edit the generated `.conf` files
+
+They're regenerated on every run and are marked as such in their own header;
+change the script, unit file, or write another override file alongside it
+instead.
 
 ## License
 
-GPL-3.0-only — see the SPDX header in each file.
+[GPL-3.0-only](<./LICENSE>), see the SPDX header in each file.
