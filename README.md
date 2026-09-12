@@ -95,4 +95,4 @@ journalctl --user -u systemd-override-gpg-socket.service
 
 ## License
 
-GPL-3.0-or-later — see the SPDX header in each file.
+GPL-3.0-only — see the SPDX header in each file.
